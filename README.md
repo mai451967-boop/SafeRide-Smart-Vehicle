@@ -2,6 +2,17 @@
 
 An integrated embedded systems & desktop telemetry project designed to enhance vehicle safety using **Arduino Uno** and a real-time **Python Dashboard**.
 
+## 🎓 Academic Info & Team Members
+- **Course:** `UR112` - Introduction to Computers (First Year - Term 1)
+- **Supervised by:** Dr. Ahmed S. Salama
+
+| Student Name | Student ID | Role |
+| :--- | :--- | :--- |
+| **Mai Elsayed Abdelmonem Elsayead** | `26030225` | Team Leader & Hardware Wiring |
+| **Haya Tarek Diab Salama Elsabbah** | `26030065` | System Validation & Sensor Testing |
+| **Menna Ibrahim Hussin Abdelhamed Alaam** | `20030203` | Python Dashboard & Visualization |
+| **Mariam Medhat Abdullah Hassan Boray** | `26030358` | Mechanical Prototype & Documentation |
+
 ## 🌟 Key Features
 - **RFID Access Control:** Engine remains locked until an authorized RFID card is scanned.
 - **Real-Time Cabin Monitoring:** Continuously tracks cabin temperature (**DHT11**) and hazardous gas/smoke levels (**MQ-2**).
