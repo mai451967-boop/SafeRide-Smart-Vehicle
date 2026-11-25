@@ -9,7 +9,7 @@
 #define RST_PIN 9
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-// تعريف شاشة LCD I2C بالعنوان 0x27 (16 عمود، 2 صف)
+// تعريف شاشة LCD I2C بالعنوان 0x27
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // تعريف حساس الحرارة DHT11
@@ -19,6 +19,7 @@ DHT dht(DHTPIN, DHTTYPE);
 
 // تعريف باقي المنافذ
 #define MQ2_PIN A0
+#define START_BTN_PIN A1  // سلك بديل لتشغيل السيارة بلمسة مع GND
 #define MOTOR_IN1 3
 #define MOTOR_IN2 4
 #define BUZZER_PIN 5
@@ -26,30 +27,32 @@ DHT dht(DHTPIN, DHTTYPE);
 #define RED_LED 7
 #define YELLOW_LED 8
 
-// متغيرات حالة النظام
+// حدود الأمان المعدلة للتجربة السريعة والآمنة
+const float WARN_TEMP = 29.0;
+const float DANGER_TEMP = 30.5;
+const int WARN_GAS = 260;
+const int DANGER_GAS = 300;
+
 bool isSystemUnlocked = false;
 String currentCardID = "NONE";
 String systemStatus = "LOCKED";
 
 unsigned long previousMillis = 0;
-const long interval = 500; // إرسال البيانات كل نصف ثانية (500 مللي ثانية)
+const long interval = 500;
 
 float currentTemp = 0.0;
 int currentGas = 0;
 
 void setup() {
   Serial.begin(9600);
-  
-  // تهيئة SPI وقارئ RFID
   SPI.begin();
   mfrc522.PCD_Init();
   
-  // تهيئة الشاشة والحساس
   lcd.init();
   lcd.backlight();
   dht.begin();
   
-  // تعريف مخارج الموتور والصفارة واللمبات
+  pinMode(START_BTN_PIN, INPUT_PULLUP);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
@@ -57,19 +60,15 @@ void setup() {
   pinMode(RED_LED, OUTPUT);
   pinMode(YELLOW_LED, OUTPUT);
   
-  // الحالة الابتدائية: النظام مغلق
   lockSystem("System Locked", "Swipe RFID Card");
 }
 
 void loop() {
-  // 1. فحص مرور كارت RFID جديد
   checkRFID();
   
-  // 2. قراءة الحساسات وتحديث الحالة وإرسال البيانات كل 500 مللي ثانية
   unsigned long currentMillis = millis();
   if (currentMillis - previousMillis >= interval) {
     previousMillis = currentMillis;
-    
     readSensors();
     evaluateSafety();
     updateLCD();
@@ -77,28 +76,10 @@ void loop() {
   }
 }
 
-void checkRFID() {
-  // البحث عن كارت جديد
-  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-    return;
-  }
-  
-  // قراءة رقم الكارت (UID) وتحويله لنص
-  String uidStr = "";
-  for (byte i = 0; i < mfrc522.uid.size; i++) {
-    if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
-    uidStr += String(mfrc522.uid.uidByte[i], HEX);
-  }
-  uidStr.toUpperCase();
-  
-  // إيقاف قراءة الكارت الحالي لمنع التكرار السريع
-  mfrc522.PICC_HaltA();
-  mfrc522.PCD_StopCrypto1();
-  
-  // إذا كان النظام مغلقاً، يتم فتحه (بشرط عدم وجود خطر حالي)
+void unlockVehicle(String id) {
   if (!isSystemUnlocked) {
     readSensors();
-    if (currentTemp > 40.0 || currentGas > 500) {
+    if (currentTemp > DANGER_TEMP || currentGas > DANGER_GAS) {
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.print("DANGER! Cannot");
@@ -109,18 +90,16 @@ void checkRFID() {
       return;
     }
     
-    currentCardID = uidStr;
+    currentCardID = id;
     isSystemUnlocked = true;
     systemStatus = "SAFE";
     
-    // تشغيل الموتور واللمبة الخضراء
     digitalWrite(RED_LED, LOW);
     digitalWrite(YELLOW_LED, LOW);
     digitalWrite(GREEN_LED, HIGH);
     digitalWrite(MOTOR_IN1, HIGH);
     digitalWrite(MOTOR_IN2, LOW);
     
-    // نغمة ترحيب قصيرة
     digitalWrite(BUZZER_PIN, HIGH);
     delay(100);
     digitalWrite(BUZZER_PIN, LOW);
@@ -135,9 +114,32 @@ void checkRFID() {
   }
 }
 
+void checkRFID() {
+  // 1. التشغيل بلمس سلك A1 بالخط الأزرق (-)
+  if (digitalRead(START_BTN_PIN) == LOW) {
+    unlockVehicle("A4F92B1C");
+    return;
+  }
+
+  // 2. التشغيل بكارت RFID
+  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
+  
+  String uidStr = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    if (mfrc522.uid.uidByte[i] < 0x10) uidStr += "0";
+    uidStr += String(mfrc522.uid.uidByte[i], HEX);
+  }
+  uidStr.toUpperCase();
+  
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+  unlockVehicle(uidStr);
+}
+
 void readSensors() {
   float t = dht.readTemperature();
-  // التأكد من صحة قراءة حساس DHT11
   if (!isnan(t)) {
     currentTemp = t;
   }
@@ -145,20 +147,11 @@ void readSensors() {
 }
 
 void evaluateSafety() {
-  if (!isSystemUnlocked) {
-    // النظام مغلق بالفعل
-    return;
-  }
+  if (!isSystemUnlocked) return;
   
-  // حالة الخطر الشديد: الحرارة > 40 أو الغاز > 500
-  if (currentTemp > 40.0 || currentGas > 500) {
-    if (currentTemp > 40.0) {
-      systemStatus = "DANGER_TEMP";
-    } else {
-      systemStatus = "DANGER_GAS";
-    }
-    
-    // إغلاق النظام فوراً وتشغيل الإنذار المستمر
+  // حالة الخطر الشديد
+  if (currentTemp > DANGER_TEMP || currentGas > DANGER_GAS) {
+    systemStatus = (currentTemp > DANGER_TEMP) ? "DANGER_TEMP" : "DANGER_GAS";
     isSystemUnlocked = false;
     digitalWrite(MOTOR_IN1, LOW);
     digitalWrite(MOTOR_IN2, LOW);
@@ -179,19 +172,16 @@ void evaluateSafety() {
     return;
   }
   
-  // حالة التحذير المبدئي: الحرارة بين 35 و 40 أو الغاز بين 350 و 500
-  if ((currentTemp >= 35.0 && currentTemp <= 40.0) || (currentGas >= 350 && currentGas <= 500)) {
+  // حالة التحذير المبدئي
+  if ((currentTemp >= WARN_TEMP && currentTemp <= DANGER_TEMP) || (currentGas >= WARN_GAS && currentGas <= DANGER_GAS)) {
     systemStatus = "WARNING";
     digitalWrite(GREEN_LED, HIGH);
     digitalWrite(YELLOW_LED, HIGH);
     digitalWrite(RED_LED, LOW);
     digitalWrite(BUZZER_PIN, LOW);
-    // يستمر الموتور في العمل
     digitalWrite(MOTOR_IN1, HIGH);
     digitalWrite(MOTOR_IN2, LOW);
-  } 
-  // الحالة الآمنة الطبيعية
-  else {
+  } else {
     systemStatus = "SAFE";
     digitalWrite(GREEN_LED, HIGH);
     digitalWrite(YELLOW_LED, LOW);
@@ -213,7 +203,6 @@ void updateLCD() {
     return;
   }
   
-  // عرض الحرارة والغاز وحالة السيارة أثناء القيادة
   lcd.setCursor(0, 0);
   lcd.print("T:");
   lcd.print(currentTemp, 1);
@@ -231,7 +220,6 @@ void updateLCD() {
 }
 
 void sendSerialData() {
-  // الصيغة الموحدة: DATA,temp,gas,status,card_id
   Serial.print("DATA,");
   Serial.print(currentTemp, 1);
   Serial.print(",");
